@@ -1,0 +1,248 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version number (e.g., 1.0.0)'
+        required: true
+        default: '1.0.0'
+
+jobs:
+  build:
+    runs-on: macos-latest
+    
+    permissions:
+      contents: write
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Setup Xcode
+      uses: maxim-lobanov/setup-xcode@v1
+      with:
+        xcode-version: latest-stable
+    
+    - name: Update version in project
+      run: |
+        if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+          VERSION="${{ github.event.inputs.version }}"
+        else
+          VERSION="${GITHUB_REF#refs/tags/v}"
+        fi
+        echo "Setting MARKETING_VERSION to $VERSION"
+        sed -i '' "s/MARKETING_VERSION = .*/MARKETING_VERSION = $VERSION;/g" CmdSwitch.xcodeproj/project.pbxproj
+    
+    - name: Import signing certificate
+      env:
+        CERTIFICATE_BASE64: ${{ secrets.APPLE_CERTIFICATE_BASE64 }}
+        CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+      run: |
+        # Decode certificate
+        echo $CERTIFICATE_BASE64 | base64 --decode > certificate.p12
+        
+        # Create temporary keychain
+        security create-keychain -p "temp123" build.keychain
+        security default-keychain -s build.keychain
+        security unlock-keychain -p "temp123" build.keychain
+        
+        # Import certificate
+        security import certificate.p12 -k build.keychain -P "$CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+        security set-key-partition-list -S apple-tool:,apple: -s -k "temp123" build.keychain
+        
+        # Clean up
+        rm certificate.p12
+    
+    - name: Create entitlements file for distribution
+      run: |
+        # Create entitlements file for distribution (without get-task-allow)
+        cat > CmdSwitch/CmdSwitch.entitlements << 'EOF'
+        <?xml version="1.0" encoding="UTF-8"?>
+        <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+        <plist version="1.0">
+        <dict>
+        </dict>
+        </plist>
+        EOF
+    
+    - name: Build application
+      run: |
+        xcodebuild -project CmdSwitch.xcodeproj \
+          -scheme CmdSwitch \
+          -configuration Release \
+          -derivedDataPath build \
+          CODE_SIGN_IDENTITY="Developer ID Application: Dongri Jin (${{ secrets.APPLE_TEAM_ID }})" \
+          OTHER_CODE_SIGN_FLAGS="--timestamp --options=runtime" \
+          build
+        
+        # Re-sign the app with correct entitlements (removes get-task-allow)
+        codesign --force --deep --timestamp --options=runtime \
+          --sign "Developer ID Application: Dongri Jin (${{ secrets.APPLE_TEAM_ID }})" \
+          --entitlements CmdSwitch/CmdSwitch.entitlements \
+          build/Build/Products/Release/CmdSwitch.app
+    
+    - name: Notarize application
+      env:
+        APPLE_ID: ${{ secrets.APPLE_ID }}
+        APPLE_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+        TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      run: |
+        # Create ZIP for notarization
+        ditto -c -k --keepParent build/Build/Products/Release/CmdSwitch.app CmdSwitch-notarize.zip
+        
+        # Submit for notarization and wait for completion
+        xcrun notarytool submit CmdSwitch-notarize.zip \
+          --apple-id "$APPLE_ID" \
+          --password "$APPLE_PASSWORD" \
+          --team-id "$TEAM_ID" \
+          --wait \
+          --output-format json > notarization_result.json || true
+        
+        # Check result and get log if failed
+        STATUS=$(cat notarization_result.json | python3 -c "import sys, json; print(json.load(sys.stdin).get('status', 'Unknown'))")
+        SUBMISSION_ID=$(cat notarization_result.json | python3 -c "import sys, json; print(json.load(sys.stdin).get('id', ''))")
+        
+        echo "Notarization status: $STATUS"
+        
+        if [ "$STATUS" != "Accepted" ]; then
+          echo "Notarization failed. Fetching log..."
+          xcrun notarytool log "$SUBMISSION_ID" \
+            --apple-id "$APPLE_ID" \
+            --password "$APPLE_PASSWORD" \
+            --team-id "$TEAM_ID" \
+            notarization_log.json
+          cat notarization_log.json
+          exit 1
+        fi
+        
+        # Staple the notarization ticket to the app
+        xcrun stapler staple build/Build/Products/Release/CmdSwitch.app
+        
+        # Clean up
+        rm CmdSwitch-notarize.zip notarization_result.json
+    
+    - name: Create DMG
+      run: |
+        # Create a temporary directory for DMG contents
+        mkdir -p dmg_contents
+        cp -R build/Build/Products/Release/CmdSwitch.app dmg_contents/
+        
+        # Create Applications symlink
+        ln -s /Applications dmg_contents/Applications
+        
+        # Create DMG
+        hdiutil create -volname "CmdSwitch" \
+          -srcfolder dmg_contents \
+          -ov -format UDZO \
+          CmdSwitch.dmg
+        
+        # Also create a ZIP for convenience
+        cd build/Build/Products/Release
+        zip -r ../../../../CmdSwitch.zip CmdSwitch.app
+    
+    - name: Get version
+      id: version
+      run: |
+        if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+          echo "version=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+        else
+          echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+        fi
+    
+    - name: Create Release
+      uses: softprops/action-gh-release@v1
+      if: startsWith(github.ref, 'refs/tags/')
+      with:
+        name: v${{ steps.version.outputs.version }}
+        draft: false
+        prerelease: false
+        files: |
+          CmdSwitch.dmg
+          CmdSwitch.zip
+        body: |
+          ## CmdSwitch v${{ steps.version.outputs.version }}
+          
+          A macOS menu bar application that allows you to switch input sources (keyboard layouts and input methods) by pressing the left or right Command key alone.
+          
+          ### Installation (Recommended: Homebrew)
+          ```bash
+          brew install --cask dongri/tap/cmd-switch
+          ```
+          
+          ### Manual Installation
+          1. Download `CmdSwitch.dmg`
+          2. Open the DMG file
+          3. Drag CmdSwitch.app to Applications folder
+          4. Double-click to launch! ✨
+          
+          > **Note**: CmdSwitch is signed and notarized by Apple, so it will launch without any security warnings.
+          
+          ### First Launch
+          When you first launch the app, macOS will prompt you to grant **Accessibility** permissions in System Settings > Privacy & Security > Accessibility.
+          
+          ### Usage
+          - Press **only** the left Command key → Switches to the input source assigned to the left Command key
+          - Press **only** the right Command key → Switches to the input source assigned to the right Command key
+          - Using Command key with other keys (e.g., `Cmd+C`, `Cmd+V`) works normally
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    
+    - name: Update Homebrew Cask
+      if: startsWith(github.ref, 'refs/tags/')
+      env:
+        HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+      run: |
+        VERSION="${{ steps.version.outputs.version }}"
+        SHA256=$(shasum -a 256 CmdSwitch.dmg | awk '{print $1}')
+        
+        git clone https://x-access-token:${HOMEBREW_TAP_TOKEN}@github.com/dongri/homebrew-tap.git
+        cd homebrew-tap
+        
+        cat > Casks/cmd-switch.rb << 'CASKEOF'
+        cask "cmd-switch" do
+          version "VERSION_PLACEHOLDER"
+          sha256 "SHA256_PLACEHOLDER"
+
+          url "https://github.com/dongri/cmd-switch/releases/download/v#{version}/CmdSwitch.dmg"
+          name "CmdSwitch"
+          desc "macOS menu bar app to switch input sources with Command key"
+          homepage "https://github.com/dongri/cmd-switch"
+
+          depends_on macos: ">= :monterey"
+
+          app "CmdSwitch.app"
+
+          zap trash: [
+            "~/Library/Application Support/org.dongri.cmd-switch",
+            "~/Library/Caches/org.dongri.cmd-switch",
+            "~/Library/Preferences/org.dongri.cmd-switch.plist",
+            "~/Library/Saved Application State/org.dongri.cmd-switch.savedState",
+          ]
+        end
+        CASKEOF
+        
+        # Remove leading spaces from heredoc content
+        sed -i '' 's/^        //' Casks/cmd-switch.rb
+        
+        # Replace placeholders with actual values
+        sed -i '' "s/VERSION_PLACEHOLDER/${VERSION}/g" Casks/cmd-switch.rb
+        sed -i '' "s/SHA256_PLACEHOLDER/${SHA256}/g" Casks/cmd-switch.rb
+        
+        git config user.name "GitHub Actions"
+        git config user.email "actions@github.com"
+        git add Casks/cmd-switch.rb
+        git commit -m "Update cmd-switch to v${VERSION}"
+        git push
+    
+    - name: Upload artifacts (for manual workflow)
+      if: github.event_name == 'workflow_dispatch'
+      uses: actions/upload-artifact@v4
+      with:
+        name: CmdSwitch-${{ steps.version.outputs.version }}
+        path: |
+          CmdSwitch.dmg
+          CmdSwitch.zip
