@@ -27,6 +27,25 @@ Perfect for bilingual users who frequently switch between different keyboard lay
 
 ## Installation
 
+### Homebrew (Recommended)
+
+The easiest way to install CmdSwitch is via Homebrew:
+
+```bash
+brew install --cask dongri/tap/cmd-switch
+```
+
+### Download DMG
+
+Download the latest release from [GitHub Releases](https://github.com/dongri/cmd-switch/releases):
+
+1. Download `CmdSwitch.dmg`
+2. Open the DMG file
+3. Drag `Cmd Switch.app` to Applications folder
+4. Double-click to launch! ✨
+
+> **Note**: CmdSwitch is signed and notarized by Apple, so it will launch without any security warnings.
+
 ### From Source
 
 1. Clone this repository:
