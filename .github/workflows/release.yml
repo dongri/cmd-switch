@@ -154,42 +154,38 @@ jobs:
         fi
 
     - name: Create Release
-      uses: softprops/action-gh-release@v1
       if: startsWith(github.ref, 'refs/tags/')
-      with:
-        name: v${{ steps.version.outputs.version }}
-        draft: false
-        prerelease: false
-        files: |
-          CmdSwitch.dmg
-          CmdSwitch.zip
-        body: |
-          ## CmdSwitch v${{ steps.version.outputs.version }}
-          
-          A macOS menu bar application that allows you to switch input sources (keyboard layouts and input methods) by pressing the left or right Command key alone.
-          
-          ### Installation (Recommended: Homebrew)
-          ```bash
-          brew install --cask dongri/tap/cmd-switch
-          ```
-          
-          ### Manual Installation
-          1. Download `CmdSwitch.dmg`
-          2. Open the DMG file
-          3. Drag CmdSwitch.app to Applications folder
-          4. Double-click to launch! ✨
-          
-          > **Note**: CmdSwitch is signed and notarized by Apple, so it will launch without any security warnings.
-          
-          ### First Launch
-          When you first launch the app, macOS will prompt you to grant **Accessibility** permissions in System Settings > Privacy & Security > Accessibility.
-          
-          ### Usage
-          - Press **only** the left Command key → Switches to the input source assigned to the left Command key
-          - Press **only** the right Command key → Switches to the input source assigned to the right Command key
-          - Using Command key with other keys (e.g., `Cmd+C`, `Cmd+V`) works normally
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        VERSION="${{ steps.version.outputs.version }}"
+        
+        # Create release with gh CLI
+        gh release create "v${VERSION}" \
+          --title "v${VERSION}" \
+          --notes "## CmdSwitch v${VERSION}
+
+        A macOS menu bar application that allows you to switch input sources (keyboard layouts and input methods) by pressing the left or right Command key alone.
+
+        ### Installation (Recommended: Homebrew)
+        \`\`\`bash
+        brew install --cask dongri/tap/cmd-switch
+        \`\`\`
+
+        ### Manual Installation
+        1. Download \`CmdSwitch.dmg\`
+        2. Open the DMG file
+        3. Drag CmdSwitch.app to Applications folder
+        4. Double-click to launch! ✨
+
+        > **Note**: CmdSwitch is signed and notarized by Apple, so it will launch without any security warnings.
+
+        ### Usage
+        - Press **only** the left Command key → Switches to the input source assigned to the left Command key
+        - Press **only** the right Command key → Switches to the input source assigned to the right Command key
+        - Using Command key with other keys (e.g., \`Cmd+C\`, \`Cmd+V\`) works normally" \
+          CmdSwitch.dmg \
+          CmdSwitch.zip
     
     - name: Update Homebrew Cask
       if: startsWith(github.ref, 'refs/tags/')
