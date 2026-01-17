@@ -83,7 +83,7 @@ jobs:
         codesign --force --deep --timestamp --options=runtime \
           --sign "Developer ID Application: Dongri Jin (${{ secrets.APPLE_TEAM_ID }})" \
           --entitlements CmdSwitch/CmdSwitch.entitlements \
-          build/Build/Products/Release/CmdSwitch.app
+          "build/Build/Products/Release/Cmd Switch.app"
     
     - name: Notarize application
       env:
@@ -92,7 +92,7 @@ jobs:
         TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
       run: |
         # Create ZIP for notarization
-        ditto -c -k --keepParent build/Build/Products/Release/CmdSwitch.app CmdSwitch-notarize.zip
+        ditto -c -k --keepParent "build/Build/Products/Release/Cmd Switch.app" CmdSwitch-notarize.zip
         
         # Submit for notarization and wait for completion
         xcrun notarytool submit CmdSwitch-notarize.zip \
@@ -120,7 +120,7 @@ jobs:
         fi
         
         # Staple the notarization ticket to the app
-        xcrun stapler staple build/Build/Products/Release/CmdSwitch.app
+        xcrun stapler staple "build/Build/Products/Release/Cmd Switch.app"
         
         # Clean up
         rm CmdSwitch-notarize.zip notarization_result.json
@@ -129,7 +129,7 @@ jobs:
       run: |
         # Create a temporary directory for DMG contents
         mkdir -p dmg_contents
-        cp -R build/Build/Products/Release/CmdSwitch.app dmg_contents/
+        cp -R "build/Build/Products/Release/Cmd Switch.app" dmg_contents/
         
         # Create Applications symlink
         ln -s /Applications dmg_contents/Applications
@@ -142,7 +142,7 @@ jobs:
         
         # Also create a ZIP for convenience
         cd build/Build/Products/Release
-        zip -r ../../../../CmdSwitch.zip CmdSwitch.app
+        zip -r "../../../../CmdSwitch.zip" "Cmd Switch.app"
     
     - name: Get version
       id: version
@@ -214,7 +214,7 @@ jobs:
 
           depends_on macos: ">= :monterey"
 
-          app "CmdSwitch.app"
+          app "Cmd Switch.app"
 
           zap trash: [
             "~/Library/Application Support/org.dongri.cmd-switch",
