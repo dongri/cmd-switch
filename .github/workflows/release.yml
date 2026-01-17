@@ -153,6 +153,19 @@ jobs:
           echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
         fi
     
+    - name: Delete existing release (if any)
+      if: startsWith(github.ref, 'refs/tags/')
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        VERSION="${{ steps.version.outputs.version }}"
+        # Delete existing release if it exists
+        gh release delete "v${VERSION}" --yes --cleanup-tag || true
+        # Recreate the tag
+        git tag -d "v${VERSION}" || true
+        git tag "v${VERSION}"
+        git push origin "v${VERSION}" --force
+    
     - name: Create Release
       uses: softprops/action-gh-release@v1
       if: startsWith(github.ref, 'refs/tags/')
